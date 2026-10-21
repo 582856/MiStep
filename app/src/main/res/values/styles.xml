@@ -1,10 +1,11 @@
+<!-- Modified by 枫彡: transparent navigation bar. -->
 <resources>
 
     <style name="AppTheme" parent="Theme.MaterialComponents.Light.NoActionBar">
         <item name="android:colorPrimaryDark">@color/colorOldPrimaryDark</item>
         <item name="android:colorPrimary">@color/colorOldPrimary</item>
         <item name="android:colorAccent">@color/colorOldAccent</item>
-        <item name="android:navigationBarColor">@color/colorOldPrimaryDark</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 
     <style name="ToolBar" parent="Widget.MaterialComponents.Toolbar">

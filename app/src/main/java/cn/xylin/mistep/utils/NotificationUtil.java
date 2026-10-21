@@ -1,9 +1,12 @@
+// Modified by 枫彡: Android notification permission handling.
 package cn.xylin.mistep.utils;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Context;
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import androidx.annotation.DrawableRes;
 import androidx.core.app.NotificationCompat;
@@ -54,6 +57,10 @@ public class NotificationUtil {
     }
 
     public void sendNotification(@DrawableRes int icon, String title, String message) {
+        if (context != null && Build.VERSION.SDK_INT >= 33
+                && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
         if (context != null) {
             //notificationId++;
             Notification notification = new NotificationCompat.Builder(context, CHANNEL_ID)

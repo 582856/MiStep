@@ -1,9 +1,11 @@
+// Modified by 枫彡: unique scheduling and automatic-run validation.
 package cn.xylin.mistep.works;
 
 import android.content.Context;
 import java.util.concurrent.TimeUnit;
 import androidx.annotation.NonNull;
 import androidx.work.OneTimeWorkRequest;
+import androidx.work.ExistingWorkPolicy;
 import androidx.work.WorkManager;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
@@ -35,7 +37,7 @@ public class AutoModifySteps extends BaseWorker {
                     .addTag(WORK_TAG)
                     .setInitialDelay(getNextTime(), TimeUnit.MILLISECONDS)
                     .build();
-            manager.enqueue(workRequest);
+            manager.enqueueUniqueWork(WORK_TAG, ExistingWorkPolicy.REPLACE, workRequest);
         }
     }
 
@@ -51,17 +53,20 @@ public class AutoModifySteps extends BaseWorker {
     @NonNull
     @Override
     public Result doWork() {
-        setNextModifySteps(getApplicationContext(), false);
+        if (Shared.getShared().getValue(Main.USER_SETTING, Main.AUTO_MODIFY_MODE, 0) != 2) {
+            return Result.success();
+        }
         boolean isSetMode = !Shared.getShared().getValue(Main.USER_SETTING, Main.MODIFY_MODE_ADD, true);
-        boolean isRootMode = Shared.getShared().getValue(Main.USER_SETTING, Main.ROOT_MODE, false);
+        boolean isRootMode = Shared.getShared().getValue(Main.USER_SETTING, Main.ROOT_MODE, true);
         int steps = Shared.getShared().getValue(Main.USER_SETTING, Main.AUTO_ADD_STEPS, 0);
         boolean result = StepUtil.modifySteps(getApplicationContext(), isSetMode, isRootMode, steps);
         if (Shared.getShared().getValue(Main.USER_SETTING, Main.TIMING_NOTIFICATION, false)) {
             NotificationUtil.get().sendNotification(
-                    "小米步数管理-" + (isRootMode ? "ROOT" : "核心破解"),
+                    getApplicationContext().getString(cn.xylin.mistep.R.string.app_name) + "-" + (isRootMode ? "ROOT" : "核心破解"),
                     (isSetMode ? "指定步数为" : "增加") + steps + "步" + (result ? "成功" : "失败")
             );
         }
+        setNextModifySteps(getApplicationContext(), false);
         return Worker.Result.success();
     }
 }

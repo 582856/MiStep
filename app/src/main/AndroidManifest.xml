@@ -1,8 +1,15 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="cn.xylin.mistep">
+<!-- Modified by 枫彡: HyperOS 4 permissions and Android build compatibility. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="miui.permission.WRITE_STEPS" />
     <uses-permission android:name="miui.permission.READ_STEPS" />
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <queries>
+        <provider android:authorities="com.miui.providers.steps" />
+        <package android:name="com.miui.powerkeeper" />
+        <package android:name="com.xiaomi.joyose" />
+    </queries>
 
     <application
         android:name=".StepApplication"
@@ -13,6 +20,7 @@
         android:theme="@style/AppTheme">
         <activity
             android:name=".activitys.Main"
+            android:exported="true"
             android:windowSoftInputMode="stateHidden"
             android:alwaysRetainTaskState="true">
             <intent-filter>

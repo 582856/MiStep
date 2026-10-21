@@ -1,6 +1,10 @@
+// Modified by 枫彡: transparent system navigation bar.
 package cn.xylin.mistep.activitys;
 
 import android.os.Bundle;
+import android.graphics.Color;
+import android.os.Build;
+import android.view.View;
 import android.widget.LinearLayout;
 import com.google.android.material.appbar.MaterialToolbar;
 import androidx.annotation.LayoutRes;
@@ -24,6 +28,13 @@ public abstract class BaseActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        getWindow().setNavigationBarColor(Color.TRANSPARENT);
+        if (Build.VERSION.SDK_INT >= 27) {
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        }
+        if (Build.VERSION.SDK_INT >= 29) {
+            getWindow().setNavigationBarContrastEnforced(false);
+        }
         super.setContentView(R.layout.content_view);
         appActivity = this;
         StepApplication.add(appActivity);

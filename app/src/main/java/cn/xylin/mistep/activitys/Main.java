@@ -1,8 +1,12 @@
+// Modified by 枫彡: permissions, asynchronous step operations and automatic-run handling.
 package cn.xylin.mistep.activitys;
 
+import android.Manifest;
 import android.app.AlertDialog;
 import android.app.TimePickerDialog;
 import android.content.DialogInterface;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.text.method.ScrollingMovementMethod;
 import android.view.View;
 import android.widget.CompoundButton;
@@ -14,6 +18,8 @@ import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textview.MaterialTextView;
 import java.util.Calendar;
 import java.util.TimeZone;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import cn.xylin.mistep.R;
 import cn.xylin.mistep.StepApplication;
 import cn.xylin.mistep.utils.Shared;
@@ -44,6 +50,9 @@ public class Main extends BaseActivity implements View.OnClickListener, Compound
     private Shared shared;
     private boolean isRootMode;
     private TimePickerDialog timeDialog;
+    private final ExecutorService stepExecutor = Executors.newSingleThreadExecutor();
+    private boolean modifying;
+    private String autoDay;
 
     @Override
     void initActivityControl() {
@@ -60,7 +69,11 @@ public class Main extends BaseActivity implements View.OnClickListener, Compound
 
     @Override
     void initControlAttribute() {
-        isRootMode = shared.getValue(USER_SETTING, ROOT_MODE, false);
+        isRootMode = shared.getValue(USER_SETTING, ROOT_MODE, true);
+        if (Build.VERSION.SDK_INT >= 29 && checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.ACTIVITY_RECOGNITION}, 1);
+        }
         updateTodaySteps();
         edtAddSteps.setText(shared.getValue(USER_SETTING, AUTO_ADD_STEPS, 0).toString());
         rdgModifyMode.check(shared.getValue(USER_SETTING, MODIFY_MODE_ADD, true) ? R.id.rdbAddSteps : R.id.rdbSetSteps);
@@ -83,6 +96,10 @@ public class Main extends BaseActivity implements View.OnClickListener, Compound
             @Override
             public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
                 shared.putValue(USER_SETTING, TIMING_NOTIFICATION, isChecked).commitShared(USER_SETTING);
+                if (isChecked && Build.VERSION.SDK_INT >= 33
+                        && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 2);
+                }
             }
         });
         MaterialButton button = findViewById(R.id.btnModifySteps);
@@ -99,17 +116,21 @@ public class Main extends BaseActivity implements View.OnClickListener, Compound
     }
 
     private void checkNewDay() {
-        int day = Calendar.getInstance(TimeZone.getDefault()).get(Calendar.DAY_OF_MONTH);
-        if (shared.getValue(USER_SETTING, DAY_INT, -1) != day) {
-            shared.putValue(USER_SETTING, DAY_INT, day).commitShared(USER_SETTING);
+        String day = todayKey();
+        if (!day.equals(shared.getValue(USER_SETTING, "dayDate", ""))) {
+            autoDay = day;
             findViewById(R.id.btnModifySteps).callOnClick();
-            StepApplication.finishAll();
         }
+    }
+
+    private String todayKey() {
+        Calendar date = Calendar.getInstance(TimeZone.getDefault());
+        return date.get(Calendar.YEAR) + "-" + date.get(Calendar.MONTH) + "-" + date.get(Calendar.DAY_OF_MONTH);
     }
 
     @Override
     public void onClick(View v) {
-        if (v.getId() == R.id.btnModifySteps) {
+        if (v.getId() == R.id.btnModifySteps && !modifying) {
             String inputStr = Util.getControlText(edtAddSteps);
             if (Util.isStrEmpty(inputStr)) {
                 Util.toast(appActivity, R.string.toast_empty_steps);
@@ -117,8 +138,33 @@ public class Main extends BaseActivity implements View.OnClickListener, Compound
                 try {
                     int steps = Integer.parseInt(inputStr);
                     shared.putValue(USER_SETTING, AUTO_ADD_STEPS, steps).commitShared(USER_SETTING);
-                    Util.toast(appActivity, StepUtil.modifySteps(getApplicationContext(), rdgModifyMode.getCheckedRadioButtonId() == R.id.rdbSetSteps, isRootMode, steps) ? "修改步数成功。" : "修改步数失败，请尝试切换模式。");
-                    updateTodaySteps();
+                    boolean setMode = rdgModifyMode.getCheckedRadioButtonId() == R.id.rdbSetSteps;
+                    boolean rootMode = isRootMode;
+                    modifying = true;
+                    v.setEnabled(false);
+                    stepExecutor.execute(() -> {
+                        boolean success = StepUtil.modifySteps(getApplicationContext(), setMode, rootMode, steps);
+                        int total = StepUtil.getTodaySteps(getApplicationContext(), rootMode);
+                        runOnUiThread(() -> {
+                            modifying = false;
+                            if (isDestroyed()) {
+                                return;
+                            }
+                            v.setEnabled(true);
+                            Util.toast(appActivity, success ? "修改步数成功。"
+                                    : "修改或验证失败，请检查运动权限、ROOT授权和运行模式。不要连续重复增加。");
+                            showTodaySteps(total);
+                            if (autoDay != null) {
+                                if (success) {
+                                    shared.putValue(USER_SETTING, "dayDate", autoDay).commitShared(USER_SETTING);
+                                }
+                                autoDay = null;
+                                if (success) {
+                                    StepApplication.finishAll();
+                                }
+                            }
+                        });
+                    });
                 } catch (NumberFormatException ignore) {
                     Util.toast(appActivity, R.string.toast_input_steps_error);
                 }
@@ -130,17 +176,15 @@ public class Main extends BaseActivity implements View.OnClickListener, Compound
     public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
         int switchId = buttonView.getId();
         if (buttonView.isPressed()) {
-            switch (switchId) {
-                case R.id.shFirstOpenAutoAdd: {
+            if (switchId == R.id.shFirstOpenAutoAdd) {
                     if (isChecked) {
                         shTimingModify.setChecked(false);
                         shared.putValue(USER_SETTING, DAY_INT, Calendar.getInstance(TimeZone.getDefault()).get(Calendar.DAY_OF_MONTH));
+                        shared.putValue(USER_SETTING, "dayDate", todayKey());
                     } else {
-                        shared.removeValue(USER_SETTING, DAY_INT);
+                        shared.removeValue(USER_SETTING, DAY_INT).removeValue(USER_SETTING, "dayDate");
                     }
-                    break;
-                }
-                case R.id.shTimingModify: {
+            } else if (switchId == R.id.shTimingModify) {
                     if (isChecked) {
                         if (timeDialog == null) {
                             timeDialog = new TimePickerDialog(
@@ -173,18 +217,16 @@ public class Main extends BaseActivity implements View.OnClickListener, Compound
                         Util.toast(appActivity, R.string.toast_please_appoint_time);
                     } else {
                         shTimingNotification.setVisibility(View.GONE);
+                        AutoModifySteps.setNextModifySteps(getApplicationContext(), true);
                     }
-                    break;
-                }
-                default: {
+            } else {
                     return;
-                }
             }
             shared.putValue(USER_SETTING, AUTO_MODIFY_MODE, !shFirstOpenAutoAdd.isChecked() && !shTimingModify.isChecked() ? 0 : shFirstOpenAutoAdd.isChecked() ? 1 : 2)
                     .commitShared(USER_SETTING);
         } else if (!isChecked) {
             if (switchId == R.id.shFirstOpenAutoAdd) {
-                shared.removeValue(USER_SETTING, DAY_INT).commitShared(USER_SETTING);
+                shared.removeValue(USER_SETTING, DAY_INT).removeValue(USER_SETTING, "dayDate").commitShared(USER_SETTING);
             } else if (switchId == R.id.shTimingModify) {
                 shTimingNotification.setVisibility(View.GONE);
                 AutoModifySteps.setNextModifySteps(getApplicationContext(), true);
@@ -193,14 +235,45 @@ public class Main extends BaseActivity implements View.OnClickListener, Compound
     }
 
     private void updateTodaySteps() {
-        tvTodaySteps.setText("今日步数：" + StepUtil.getTodaySteps(getApplicationContext()));
+        boolean rootMode = isRootMode;
+        stepExecutor.execute(() -> {
+            int steps = StepUtil.getTodaySteps(getApplicationContext(), rootMode);
+            runOnUiThread(() -> {
+                if (!isDestroyed()) {
+                    showTodaySteps(steps);
+                }
+            });
+        });
+    }
+
+    private void showTodaySteps(int steps) {
+        tvTodaySteps.setText(steps < 0 ? "今日步数：读取失败，请授权运动/ROOT权限"
+                : "今日步数：" + steps + (isRootMode ? "（ROOT）" : "（核心破解）"));
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == 1) {
+            updateTodaySteps();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        stepExecutor.shutdown();
+        super.onDestroy();
     }
 
     @Override
     public boolean onLongClick(View v) {
+        if (modifying) {
+            return true;
+        }
         isRootMode = !isRootMode;
         Util.toast(appActivity, "已切换为" + (isRootMode ? "ROOT" : "核心破解") + "模式。");
         shared.putValue(USER_SETTING, ROOT_MODE, isRootMode).commitShared(USER_SETTING);
+        updateTodaySteps();
         return true;
     }
 
@@ -212,8 +285,15 @@ public class Main extends BaseActivity implements View.OnClickListener, Compound
                     .setNeutralButton(R.string.dialog_record_btn_enable, new DialogInterface.OnClickListener() {
                         @Override
                         public void onClick(DialogInterface dialog, int which) {
-                            Util.toast(appActivity, StepUtil.rootEnableRecordApp() ? R.string.toast_record_enable_success : R.string.toast_record_enable_fail);
-                            updateTodaySteps();
+                            stepExecutor.execute(() -> {
+                                boolean enabled = StepUtil.rootEnableRecordApp();
+                                runOnUiThread(() -> {
+                                    if (!isDestroyed()) {
+                                        Util.toast(appActivity, enabled ? R.string.toast_record_enable_success : R.string.toast_record_enable_fail);
+                                        updateTodaySteps();
+                                    }
+                                });
+                            });
                         }
                     })
                     .setNegativeButton(R.string.dialog_record_btn_cancel, new DialogInterface.OnClickListener() {
